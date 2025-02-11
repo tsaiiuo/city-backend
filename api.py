@@ -17,11 +17,11 @@ import requests
 app = Flask(__name__)
 CORS(app)
 
-# MySQL 資料庫配置
+# MySQL 資料庫配置 替換MySQL 資訊 
 db_config = {
     "host": "localhost",
     "user": "root",
-    "password": "Ianlovemom1",  # 替換為您的 MySQL 密碼
+    "password": "Ianlovemom1",  # 替換為MySQL 
     "database": "cityproject"
 }
 # 定義台灣時區
