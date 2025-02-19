@@ -270,6 +270,30 @@ def get_tasks():
 
     results = execute_query(query, params)
     return jsonify(results), 200
+@app.route('/employees/<int:employee_id>/work', methods=['PUT'])
+def update_employee_work(employee_id):
+    """
+    更新指定員工 (employee_id) 的 work 欄位。
+    前端應透過 JSON 傳入:
+      {
+         "work": 0 或 1
+      }
+    """
+    data = request.get_json()
+    if not data or 'work' not in data:
+        return jsonify({"error": "請提供 work 欄位的值"}), 400
+
+    work = data.get('work')
+    # 可加入驗證，確認 work 值是否為 0 或 1
+    if work not in [0, 1]:
+        return jsonify({"error": "work 欄位值必須是 0 或 1"}), 400
+
+    query = "UPDATE employees SET work = %s WHERE employee_id = %s"
+    try:
+        execute_query(query, (work, employee_id), fetch=False)
+        return jsonify({"message": "員工工作狀態更新成功"}), 200
+    except Exception as e:
+        return jsonify({"error": f"資料庫錯誤: {str(e)}"}), 500
 
 # Complete Task API
 @app.route("/tasks/complete/<int:task_id>", methods=["PUT"])
@@ -278,18 +302,33 @@ def complete_task(task_id):
     將指定 task_id 的任務標記為已完結，設定 is_scheduled 為 1，
     並計算該任務已完成的總工時，將 (task_id, total_time) 插入 record 表中。
     """
-    # 先更新 tasks 表
+    # 更新 tasks 表
     query = "UPDATE tasks SET is_scheduled = 1 WHERE task_id = %s"
     try:
         execute_query(query, [task_id], fetch=False)
     except Exception as e:
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
-    # 取得台灣當前時間
-    current_time = datetime.now(taiwan_tz)
+    # 由前端傳入的 JSON 解析 current_time
+    try:
+        data = request.get_json()
+        # 取得前端傳入的 current_time 字串
+        current_time_str = data.get("current_time")
+        if current_time_str:
+            # 使用 dateutil.parser 解析前端傳入的時間字串
+            from dateutil import parser
+            current_time = parser.parse(current_time_str)
+            # 將時間轉換到台灣時區（若原字串有 offset，這裡會轉換成 taiwan_tz 的時間）
+            current_time = current_time.astimezone(taiwan_tz)
+        else:
+            # 若前端未提供，則以當前台灣時間為準
+            current_time = datetime.now(taiwan_tz)
+    except Exception as e:
+        return jsonify({"error": f"Error parsing current_time: {str(e)}"}), 400
+
     total_time = 0.0
     try:
-        # 從 schedule 表中撈取該 task_id 的所有排班記錄
+        # 撈取該 task_id 的所有排班記錄
         schedule_query = "SELECT start_time, end_time FROM schedule WHERE task_id = %s"
         schedules = execute_query(schedule_query, [task_id])
         
