@@ -21,7 +21,7 @@ CORS(app)
 db_config = {
     "host": "localhost",
     "user": "root",
-    "password": "Ianlovemom1",  # 替換為MySQL 
+    "password": "123123",  # 替換為MySQL 
     "database": "cityproject"
 }
 # 定義台灣時區
@@ -55,6 +55,9 @@ def get_current_taiwan_time():
     if hour == 24:
         hour = 0
         taiwan_now += timedelta(days=1)
+
+    # 再加五天
+    taiwan_now += timedelta(days=5)
     # 格式化時間
     return taiwan_now.replace(hour=hour, minute=minute, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
 print(get_current_taiwan_time())
@@ -667,7 +670,7 @@ offices = {
 
 #政府公開資料查詢經緯度
 
-csv_path = '/Users/huannn/Desktop/cityproject/flask/109年度臺南市宗地地號屬性資料_合併.csv'
+csv_path = './109年度臺南市宗地地號屬性資料_合併.csv'
 df = pd.read_csv(csv_path)
 
 def get_lat_lng(adm_num,land_num): #adm_num , land_num皆為str
@@ -678,7 +681,16 @@ def get_lat_lng(adm_num,land_num): #adm_num , land_num皆為str
     lng = find["Longitude"].values[0]
     return lat,lng
   else:
-    return None
+    try:
+      find = df[(df["地段碼"].astype(str) == str(adm_num)) & (df["地號"] == str(land_num).split('-')[0])]
+      print("aa",str(land_num).split('-')[0])
+      lat = find["Latitude"].values[0]
+      lng = find["Longitude"].values[0]
+    except Exception as error:
+      print('Caught this error: ' + repr(error))
+      return None,None
+    return lat,lng
+
 print(get_lat_lng('5311','466-4'))
 print(get_lat_lng('8019','4-10'))
 
@@ -761,6 +773,7 @@ def time_predict():
   cor_off = [offices[office]["lon"], offices[office]["lat"]]
   lat , lng = get_lat_lng(adm_num,land_num)
   cor_des = [lng,lat]
+  if lat is None: return jsonify({"error": "land section/local points not found"}), 404
   distance = calculate_distance_ors(api_key,[cor_off,cor_des])
   time = time+int(distance)*0.002
 
