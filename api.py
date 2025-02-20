@@ -135,7 +135,7 @@ def assign_task(task_id, required_hours):
             current_time = taiwan_tz.localize(current_time)
 
            
-            print(start_time <= current_time <= end_time)
+            # print(start_time <= current_time <= end_time)
             if start_time <= current_time < end_time:
                 return False
         return True
@@ -179,7 +179,7 @@ def assign_task(task_id, required_hours):
         second_assigned_slots = generate_slots(second_best_employee["employee_id"], current_time_slot, required_shifts)
         second_start_time = second_assigned_slots[0]
         second_end_time = second_assigned_slots[-1]
-
+        print(best_employee["name"])
         return {
             "task_id": task_id,
             "best_assignment": {
@@ -204,7 +204,7 @@ def assign_task(task_id, required_hours):
         best_assigned_slots = generate_slots(best_employee["employee_id"], current_time_slot, required_shifts)
         best_start_time = best_assigned_slots[0]
         best_end_time = best_assigned_slots[-1]
-
+        print(best_employee["name"])
         return {
             "task_id": task_id,
             "best_assignment": {
@@ -217,6 +217,7 @@ def assign_task(task_id, required_hours):
             "second_best_assignment": None  # 無次佳分配
         }
     else:
+        print(123)
         return {"error": "No available employees"}
 
 
