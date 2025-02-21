@@ -10,7 +10,6 @@ from collections import defaultdict
 import pandas as pd
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import requests
 #---------------------------------
 
@@ -164,7 +163,7 @@ def assign_task(task_id, required_hours):
     available_employees = sorted(
         [
             emp for emp in employees
-            if emp["work"] == 1 and is_time_slot_available(emp["employee_id"], current_time_slot)
+            if emp["work"] == 1 
         ],
         key=lambda emp: emp["work_hours"]
     )
@@ -507,7 +506,9 @@ def delete_schedule():
     end = datetime.fromisoformat(end_time.rstrip("Z"))
     hours_diff = (end - start).total_seconds() / 3600.0
     print("Hours difference:", hours_diff)
-    update_emp_query = "UPDATE employees SET work_hours = work_hours - %s WHERE employee_id = %s"
+    
+    # 使用 GREATEST 保證 work_hours 不會小於 0
+    update_emp_query = "UPDATE employees SET work_hours = GREATEST(work_hours - %s, 0) WHERE employee_id = %s"
     execute_query(update_emp_query, [hours_diff, employee_id], fetch=False)
 
     # 更新月工時：以排班開始時間所在的年份與月份為依據
@@ -516,12 +517,13 @@ def delete_schedule():
     month = schedule_dt.month
     update_monthly_query = """
         UPDATE monthly_work_hours 
-        SET work_hours = work_hours - %s 
+        SET work_hours = GREATEST(work_hours - %s, 0)
         WHERE employee_id = %s AND year = %s AND month = %s
     """
     execute_query(update_monthly_query, [hours_diff, employee_id, year, month], fetch=False)
 
     return jsonify({"message": "Schedule deleted successfully"}), 200
+
 
 @app.route("/monthly_work_hours", methods=["GET"])
 def get_monthly_work_hours():
