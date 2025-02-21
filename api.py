@@ -21,7 +21,7 @@ CORS(app)
 db_config = {
     "host": "localhost",
     "user": "root",
-    "password": "123123",  # 替換為MySQL 
+    "password": "Ianlovemom1",  # 替換為MySQL 
     "database": "cityproject"
 }
 # 定義台灣時區
@@ -452,6 +452,7 @@ def get_schedule():
             schedule.task_id,
             employees.name AS name,
             tasks.check_time AS check_time,
+            tasks.land_section AS land_section,
             tasks.local_point AS local_point,
             tasks.stake_point AS stake_point,
             tasks.work_area AS work_area
@@ -647,6 +648,42 @@ def get_employees():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/employees", methods=["POST"])
+def add_employee():
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing required field: name"}), 400
+
+    # 讀取前端傳入的資料，若未提供 work 或 work_hours 則預設為 0
+    name = data.get("name")
+    work = data.get("work", 1)
+    work_hours = data.get("work_hours", 0)
+
+    # 建立 INSERT 語句
+    query = "INSERT INTO employees (name, work, work_hours) VALUES (%s, %s, %s)"
+    # 取得資料庫連線並執行
+    connection = mysql.connector.connect(**db_config)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, (name, work, work_hours))
+        connection.commit()
+        # 取得自動生成的 employee_id
+        employee_id = cursor.lastrowid
+    except mysql.connector.Error as e:
+        connection.rollback()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        connection.close()
+    
+    # 回傳新增的員工資料
+    new_employee = {
+        "employee_id": employee_id,
+        "name": name,
+        "work": work,
+        "work_hours": work_hours
+    }
+    return jsonify(new_employee), 201
 
 
 
