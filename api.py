@@ -273,6 +273,40 @@ def get_tasks():
 
     results = execute_query(query, params)
     return jsonify(results), 200
+@app.route("/tasks/<int:task_id>", methods=["PUT"])
+def update_task(task_id):
+    data = request.get_json()
+    # 允許更新的欄位
+    allowed_fields = [
+        "office_name", "land_section", "local_point", "stake_point",
+        "work_area", "check_time", "diagramornumeric", "cadastral_arrangement"
+    ]
+    update_fields = []
+    params = []
+    for field in allowed_fields:
+        if field in data:
+            update_fields.append(f"{field} = %s")
+            params.append(data[field])
+    if not update_fields:
+        return jsonify({"error": "No fields to update"}), 400
+
+    params.append(task_id)
+    query = f"UPDATE tasks SET {', '.join(update_fields)} WHERE task_id = %s"
+
+    connection = mysql.connector.connect(**db_config)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, params)
+        connection.commit()
+    except mysql.connector.Error as e:
+        connection.rollback()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+    return jsonify({"message": "Task updated successfully"}), 200
+
 @app.route('/employees/<int:employee_id>/work', methods=['PUT'])
 def update_employee_work(employee_id):
     """
@@ -398,6 +432,18 @@ def add_schedule():
         if not result:
             return jsonify({"error": "Employee not found"}), 404
         employee_id = result[0]["employee_id"]
+    if(end_time<start_time):
+        return jsonify({"error": "End Time should after the Start Time"}), 400
+    # 檢查排班時間是否重疊：
+    # 假設排班時間皆採用 ISO 格式存放，直接以字串比較也可，或轉為 DATETIME 比較更精確
+    conflict_query = """
+        SELECT * FROM schedule 
+        WHERE employee_id = %s 
+          AND (start_time < %s AND end_time > %s)
+    """
+    conflict = execute_query(conflict_query, [employee_id, end_time, start_time])
+    if conflict and len(conflict) > 0:
+        return jsonify({"error": "Schedule conflict exists for the given time interval."}), 400
 
     insert_query = """
         INSERT INTO schedule (start_time, end_time, employee_id, task_id)
@@ -413,20 +459,15 @@ def add_schedule():
     execute_query(update_query, [hours_diff, employee_id], fetch=False)
 
     # 更新月工時
-    # 以排班的開始時間為依據取得年份與月份
     schedule_dt = datetime.fromisoformat(start_time.rstrip("Z"))
     year = schedule_dt.year
     month = schedule_dt.month
-
-    # 檢查是否已有該員工該年月的記錄
     select_query = "SELECT * FROM monthly_work_hours WHERE employee_id = %s AND year = %s AND month = %s"
     monthly_records = execute_query(select_query, [employee_id, year, month])
     if monthly_records and len(monthly_records) > 0:
-        # 更新現有記錄
         update_monthly_query = "UPDATE monthly_work_hours SET work_hours = work_hours + %s WHERE employee_id = %s AND year = %s AND month = %s"
         execute_query(update_monthly_query, [hours_diff, employee_id, year, month], fetch=False)
     else:
-        # 插入新記錄
         insert_monthly_query = "INSERT INTO monthly_work_hours (employee_id, year, month, work_hours) VALUES (%s, %s, %s, %s)"
         execute_query(insert_monthly_query, [employee_id, year, month, hours_diff], fetch=False)
 
@@ -458,6 +499,7 @@ def get_schedule():
         FROM schedule
         JOIN employees ON schedule.employee_id = employees.employee_id
         JOIN tasks ON schedule.task_id = tasks.task_id
+        
     """
     params = []
     conditions = []
@@ -616,6 +658,95 @@ def assign_task_api():
 
     result = assign_task(task_id, required_hours)
     return jsonify(result)
+
+# 取得所有請假記錄
+@app.route("/leave_records", methods=["GET"])
+def get_leave_records():
+    try:
+        query = """
+            SELECT leave_id, leave_records.employee_id AS employee_id, start_time AS start, end_time AS end, leave_type, reason, created_at, employees.name AS name
+            FROM leave_records
+            JOIN employees ON leave_records.employee_id = employees.employee_id
+        """
+        records = execute_query(query)
+        return jsonify(records), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 新增請假記錄
+@app.route("/leave_records", methods=["POST"])
+def add_leave_record():
+    data = request.get_json()
+    # 必填欄位： employee_id, start_time, end_time, leave_type
+    required_fields = ["employee_id", "start_time", "end_time", "leave_type"]
+    if not data or any(field not in data for field in required_fields):
+        return jsonify({"error": "Missing required field(s)"}), 400
+
+    employee_id = data.get("employee_id")
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
+    leave_type = data.get("leave_type")
+    reason = data.get("reason")  # 可選欄位
+
+    query = """
+        INSERT INTO leave_records (employee_id, start_time, end_time, leave_type, reason)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    connection = mysql.connector.connect(**db_config)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, (employee_id, start_time, end_time, leave_type, reason))
+        connection.commit()
+        leave_id = cursor.lastrowid
+    except mysql.connector.Error as e:
+        connection.rollback()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+    new_record = {
+        "leave_id": leave_id,
+        "employee_id": employee_id,
+        "start_time": start_time,
+        "end_time": end_time,
+        "leave_type": leave_type,
+        "reason": reason,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    return jsonify(new_record), 201
+
+# 刪除請假記錄（依 leave_id 刪除）
+@app.route("/leave_records/<int:leave_id>", methods=["DELETE"])
+def delete_leave_record(leave_id):
+    query = "DELETE FROM leave_records WHERE leave_id = %s"
+    try:
+        execute_query(query, (leave_id,), fetch=False)
+        return jsonify({"message": "Leave record deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 更新請假記錄（依 leave_id 更新）
+@app.route("/leave_records/<int:leave_id>", methods=["PUT"])
+def update_leave_record(leave_id):
+    data = request.get_json()
+    # 允許更新的欄位
+    updatable_fields = ["employee_id", "start_time", "end_time", "leave_type", "reason"]
+    update_fragments = []
+    params = []
+    for field in updatable_fields:
+        if field in data:
+            update_fragments.append(f"{field} = %s")
+            params.append(data[field])
+    if not update_fragments:
+        return jsonify({"error": "No fields to update"}), 400
+    params.append(leave_id)
+    query = f"UPDATE leave_records SET {', '.join(update_fragments)} WHERE leave_id = %s"
+    try:
+        execute_query(query, params, fetch=False)
+        return jsonify({"message": "Leave record updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # # Load the CSV files
