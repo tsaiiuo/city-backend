@@ -5,7 +5,7 @@ from datetime import datetime
 from datetime import datetime, timedelta
 import pytz
 from collections import defaultdict
-
+from dotenv import load_dotenv
 #---------------------------------
 import pandas as pd
 import os
@@ -14,15 +14,16 @@ import requests
 #---------------------------------
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # MySQL 資料庫配置 替換MySQL 資訊 
 db_config = {
-    "host": "localhost",
-    "user": "root",
-    "password": "Ianlovemom1",  # 替換為MySQL 
-    "database": "cityproject"
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "user": os.getenv("MYSQL_USER", "root"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "database": os.getenv("MYSQL_DATABASE", "cityproject")
 }
+print(db_config)
 # 定義台灣時區
 taiwan_tz = pytz.timezone("Asia/Taipei")
 def get_current_taiwan_time():
@@ -955,6 +956,13 @@ def time_predict():
     return '8'
   elif time>=330:
     return '16'
-
+@app.route('/checkpoint', methods=['GET'])
+def checkpoint():
+    current_time = datetime.utcnow().isoformat() + 'Z'
+    return jsonify({
+        'status': 'ok',
+        'message': 'Checkpoint reached successfully!',
+        'timestamp': current_time
+    })
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)
