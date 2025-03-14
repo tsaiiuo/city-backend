@@ -20,7 +20,7 @@ CORS(app)
 db_config = {
     "host": "localhost",
     "user": "root",
-    "password": "Ianlovemom1",  # 替換為MySQL 
+    "password": "gotobed!",  # 替換為MySQL 
     "database": "cityproject"
 }
 # 定義台灣時區
@@ -748,6 +748,96 @@ def update_leave_record(leave_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# #分割
+# 取得所有分割記錄
+@app.route("/divide_records", methods=["GET"])
+def get_divide_records():
+    try:
+        query = """
+            SELECT divide_id, divide_records.employee_id AS employee_id, start_time AS start, end_time AS end, created_at, employees.name AS name, divide_records.location_num, divide_records.land_num 
+            FROM divide_records
+            JOIN employees ON divide_records.employee_id = employees.employee_id
+        """
+        records = execute_query(query)
+        return jsonify(records), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 新增分割記錄
+@app.route("/divide_records", methods=["POST"])
+def add_divide_record():
+    data = request.get_json()
+    # 必填欄位： employee_id, start_time, end_time, location_num, land_num
+    required_fields = ["employee_id", "start_time", "end_time","location_num", "land_num"]
+    if not data or any(field not in data for field in required_fields):
+        return jsonify({"error": "Missing required field(s)"}), 400
+
+    employee_id = data.get("employee_id")
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
+    location_num = data.get("location_num")
+    land_num = data.get("land_num")
+
+    query = """
+        INSERT INTO divide_records (employee_id, start_time, end_time, location_num, land_num)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    connection = mysql.connector.connect(**db_config)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, (employee_id, start_time, end_time, location_num, land_num))
+        connection.commit()
+        divide_id = cursor.lastrowid
+    except mysql.connector.Error as e:
+        connection.rollback()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+    new_record = {
+        "divide_id": divide_id,
+        "employee_id": employee_id,
+        "start_time": start_time,
+        "end_time": end_time,
+        "location_num": location_num,
+        "land_num": land_num,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    return jsonify(new_record), 201
+
+# 刪除分割記錄（依 divide_id 刪除）
+@app.route("/divide_records/<int:divide_id>", methods=["DELETE"])
+def delete_divide_record(divide_id):
+    query = "DELETE FROM divide_records WHERE divide_id = %s"
+    try:
+        execute_query(query, (divide_id,), fetch=False)
+        return jsonify({"message": "Divide record deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 更新請假記錄（依 divide_id 更新）
+@app.route("/divide_records/<int:divide_id>", methods=["PUT"])
+def update_divide_record(divide_id):
+    data = request.get_json()
+    # 允許更新的欄位
+    updatable_fields = ["employee_id", "start_time", "end_time", "location_num", "land_num"]
+    update_fragments = []
+    params = []
+    for field in updatable_fields:
+        if field in data:
+            update_fragments.append(f"{field} = %s")
+            params.append(data[field])
+    if not update_fragments:
+        return jsonify({"error": "No fields to update"}), 400
+    params.append(divide_id)
+    query = f"UPDATE divide_records SET {', '.join(update_fragments)} WHERE divide_id = %s"
+    try:
+        execute_query(query, params, fetch=False)
+        return jsonify({"message": "Divide record updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+#分割
 
 # # Load the CSV files
 # FilePath = '/Users/huannn/Desktop/cityproject/flask/data'
