@@ -969,6 +969,15 @@ def update_employee(employee_id):
 
     return jsonify({"message": "Employee updated successfully"}), 200
 
+@app.route("/offices", methods=["GET"])
+def get_offices():
+    try:
+        query = "SELECT office_id, name FROM offices"
+        offices = execute_query(query)
+        return jsonify(offices), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 #事務所經緯度資料
 offices = {
