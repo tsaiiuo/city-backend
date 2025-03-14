@@ -1,4 +1,5 @@
 Flask==2.0.3
+Werkzeug==2.0.3
 flask-cors==3.0.10
 mysql-connector-python==8.0.28
 pytz==2021.3
@@ -6,3 +7,40 @@ pandas==1.3.5
 numpy==1.26.4
 matplotlib==3.5.1
 requests==2.27.1
+python-dotenv==1.0.1
+# @app.route("/employees", methods=["POST"])
+# def add_employee():
+#     data = request.get_json()
+#     if not data or "name" not in data:
+#         return jsonify({"error": "Missing required field: name"}), 400
+
+#     # 讀取前端傳入的資料，若未提供 work 或 work_hours 則預設為 0
+#     name = data.get("name")
+#     work = data.get("work", 1)
+#     work_hours = data.get("work_hours", 0)
+
+#     # 建立 INSERT 語句
+#     query = "INSERT INTO employees (name, work, work_hours) VALUES (%s, %s, %s)"
+#     # 取得資料庫連線並執行
+#     connection = mysql.connector.connect(**db_config)
+#     cursor = connection.cursor()
+#     try:
+#         cursor.execute(query, (name, work, work_hours))
+#         connection.commit()
+#         # 取得自動生成的 employee_id
+#         employee_id = cursor.lastrowid
+#     except mysql.connector.Error as e:
+#         connection.rollback()
+#         return jsonify({"error": f"Database error: {str(e)}"}), 500
+#     finally:
+#         cursor.close()
+#         connection.close()
+    
+#     # 回傳新增的員工資料
+#     new_employee = {
+#         "employee_id": employee_id,
+#         "name": name,
+#         "work": work,
+#         "work_hours": work_hours
+#     }
+#     return jsonify(new_employee), 201

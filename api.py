@@ -5,24 +5,33 @@ from datetime import datetime
 from datetime import datetime, timedelta
 import pytz
 from collections import defaultdict
-
+from dotenv import load_dotenv
 #---------------------------------
 import pandas as pd
 import os
 import numpy as np
 import requests
+
 #---------------------------------
 
 app = Flask(__name__)
-CORS(app)
-
+CORS(app, resources={r"/*": {"origins": "*"}})
+load_dotenv()
 # MySQL 資料庫配置 替換MySQL 資訊 
 db_config = {
+<<<<<<< HEAD
     "host": "localhost",
     "user": "root",
     "password": "gotobed!",  # 替換為MySQL 
     "database": "cityproject"
+=======
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "user": os.getenv("MYSQL_USER", "root"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "database": os.getenv("MYSQL_DATABASE", "cityproject")
+>>>>>>> 4bdcdf2a9ab6b6e38db72843a761c02b27bb8d71
 }
+print(os.getenv("MYSQL_HOST"))
 # 定義台灣時區
 taiwan_tz = pytz.timezone("Asia/Taipei")
 def get_current_taiwan_time():
@@ -117,8 +126,12 @@ def assign_task(task_id, required_hours):
         """
         根據 employee_id 從 schedule 表中獲取員工的所有排班時間段
         """
-        query = "SELECT start_time, end_time FROM schedule WHERE employee_id = %s"
-        return execute_query(query, (employee_id,))
+        query = """
+        SELECT start_time, end_time FROM schedule WHERE employee_id = %s
+        UNION ALL
+        SELECT start_time, end_time FROM leave_records WHERE employee_id = %s
+        """        
+        return execute_query(query, (employee_id,employee_id))
 
     def is_time_slot_available(employee_id, time_slot):
         """
@@ -167,7 +180,16 @@ def assign_task(task_id, required_hours):
         ],
         key=lambda emp: emp["work_hours"]
     )
-
+    if required_hours == 0 :
+        return {
+            "task_id": task_id,
+            "best_assignment": {
+                "assigned_employee": "無法判別地號請自行選擇員工",
+                "assigned_slots": "",
+                "start_time": "",
+                "end_time": "",
+                "required_hours": "無法判別地號"
+            }}
     if len(available_employees) >= 2:  # 確保有足夠的員工可選
         best_employee = available_employees[0]
         second_best_employee = available_employees[1]
@@ -220,7 +242,15 @@ def assign_task(task_id, required_hours):
         }
     else:
         print(123)
-        return {"error": "No available employees"}
+        return {
+            "task_id": task_id,
+            "best_assignment": {
+                "assigned_employee": "無法判別地號請自行選擇員工",
+                "assigned_slots": "",
+                "start_time": "",
+                "end_time": "",
+                "required_hours": "無員工可排班"
+            }}
 
 
 
@@ -653,7 +683,7 @@ def assign_task_api():
     task_id = data.get("task_id")
     required_hours = data.get("required_hours")
 
-    if not task_id or not required_hours:
+    if not task_id :
         return jsonify({"error": "Missing required fields"}), 400
 
     result = assign_task(task_id, required_hours)
@@ -908,6 +938,36 @@ def add_employee():
     }
     return jsonify(new_employee), 201
 
+@app.route("/employees/<int:employee_id>", methods=["PUT"])
+def update_employee(employee_id):
+    data = request.get_json()
+    # 允許更新的欄位
+    allowed_fields = ["name", "work", "work_hours"]
+    update_fields = []
+    params = []
+    for field in allowed_fields:
+        if field in data:
+            update_fields.append(f"{field} = %s")
+            params.append(data[field])
+    if not update_fields:
+        return jsonify({"error": "No fields to update"}), 400
+
+    params.append(employee_id)
+    query = f"UPDATE employees SET {', '.join(update_fields)} WHERE employee_id = %s"
+    
+    connection = mysql.connector.connect(**db_config)
+    cursor = connection.cursor()
+    try:
+        cursor.execute(query, params)
+        connection.commit()
+    except mysql.connector.Error as e:
+        connection.rollback()
+        return jsonify({"error": f"Database error: {str(e)}"}), 500
+    finally:
+        cursor.close()
+        connection.close()
+
+    return jsonify({"message": "Employee updated successfully"}), 200
 
 
 #事務所經緯度資料
@@ -1033,7 +1093,7 @@ def time_predict():
   cor_off = [offices[office]["lon"], offices[office]["lat"]]
   lat , lng = get_lat_lng(adm_num,land_num)
   cor_des = [lng,lat]
-  if lat is None: return jsonify({"error": "land section/local points not found"}), 404
+  if lat is None: return '0'
   distance = calculate_distance_ors(api_key,[cor_off,cor_des])
   time = time+int(distance)*0.002
 
@@ -1045,6 +1105,13 @@ def time_predict():
     return '8'
   elif time>=330:
     return '16'
-
+@app.route('/checkpoint', methods=['GET'])
+def checkpoint():
+    current_time = datetime.utcnow().isoformat() + 'Z'
+    return jsonify({
+        'status': 'ok',
+        'message': 'Checkpoint reached successfully!',
+        'timestamp': current_time
+    })
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=8080)
