@@ -19,17 +19,10 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 load_dotenv()
 # MySQL 資料庫配置 替換MySQL 資訊 
 db_config = {
-<<<<<<< HEAD
-    "host": "localhost",
-    "user": "root",
-    "password": "gotobed!",  # 替換為MySQL 
-    "database": "cityproject"
-=======
     "host": os.getenv("MYSQL_HOST", "localhost"),
     "user": os.getenv("MYSQL_USER", "root"),
     "password": os.getenv("MYSQL_PASSWORD", ""),
     "database": os.getenv("MYSQL_DATABASE", "cityproject")
->>>>>>> 4bdcdf2a9ab6b6e38db72843a761c02b27bb8d71
 }
 print(os.getenv("MYSQL_HOST"))
 # 定義台灣時區
@@ -260,7 +253,7 @@ def assign_task(task_id, required_hours):
 def add_task():
     data = request.json
     fields = [
-        "office_name", "land_section", "local_point", "stake_point",
+        "office_name","office_id", "land_section", "local_point", "stake_point",
         "work_area", "check_time", "diagramornumeric", "cadastral_arrangement"
     ]
     values = [data.get(field) for field in fields]
@@ -294,12 +287,21 @@ def add_task():
 @app.route("/tasks", methods=["GET"])
 def get_tasks():
     is_scheduled = request.args.get("is_scheduled")
+    office_id = request.args.get("office_id")
     query = "SELECT * FROM tasks"
     params = []
+    conditions = []
 
     if is_scheduled:
-        query += " WHERE is_scheduled = %s"
+        conditions.append("is_scheduled = %s")
         params.append(is_scheduled)
+
+    if office_id:
+        conditions.append("office_id = %s")
+        params.append(office_id)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
 
     results = execute_query(query, params)
     return jsonify(results), 200
@@ -510,6 +512,7 @@ def get_schedule():
     end_time = request.args.get("end_time")
     employee_id = request.args.get("employee_id")
     task_id = request.args.get("task_id")
+    office_id = request.args.get("office_id")
 
     query = """
         SELECT
@@ -529,8 +532,8 @@ def get_schedule():
         FROM schedule
         JOIN employees ON schedule.employee_id = employees.employee_id
         JOIN tasks ON schedule.task_id = tasks.task_id
-        
     """
+
     params = []
     conditions = []
 
@@ -550,10 +553,15 @@ def get_schedule():
         conditions.append("schedule.task_id = %s")
         params.append(task_id)
 
+    if office_id:
+        conditions.append("employees.office_id = %s")
+        params.append(office_id)
+
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
     results = execute_query(query, params)
+
     print(jsonify(results))
     return jsonify(results), 200
 
@@ -603,7 +611,7 @@ def get_monthly_work_hours():
     month = request.args.get("month")
     # 若未提供 year，預設為目前台灣時區的年份
     year = request.args.get("year") or datetime.now(taiwan_tz).year
-
+    office_id = request.args.get("office_id")
     if not month:
         return jsonify({"error": "Missing required parameter: month"}), 400
 
@@ -611,10 +619,10 @@ def get_monthly_work_hours():
         SELECT e.employee_id, e.name, SUM(m.work_hours) AS total_hours
         FROM monthly_work_hours m
         JOIN employees e ON m.employee_id = e.employee_id
-        WHERE m.year = %s AND m.month = %s
-        GROUP BY e.employee_id, e.name
+        WHERE m.year = %s AND m.month = %s AND e.office_id = %s
+        GROUP BY e.employee_id, e.name, e.office_id
     """
-    result = execute_query(query, [year, month])
+    result = execute_query(query, [year, month,office_id])
     return jsonify(result), 200
 @app.route("/tasks/yearly_counts", methods=["GET"])
 def get_yearly_tasks_counts():
@@ -623,24 +631,31 @@ def get_yearly_tasks_counts():
     若某個月份無資料，則回傳 count 為 0。
     查詢參數:
       - year (可選): 年份，若未提供則預設使用目前台灣時區的年份
+      - office_id (可選): 過濾指定事務所的資料
     回傳格式: { "year": <year>, "monthly_counts": [{"month": 1, "count": ...}, ...] }
     """
     year = request.args.get("year") or datetime.now(taiwan_tz).year
+    office_id = request.args.get("office_id")
 
     query = """
         SELECT MONTH(created_at) AS month, COUNT(*) AS count
         FROM tasks
         WHERE YEAR(created_at) = %s
-        GROUP BY MONTH(created_at)
     """
-    result = execute_query(query, [year])
+    params = [year]
+
+    if office_id:
+        query += " AND office_id = %s"
+        params.append(office_id)
+
+    query += " GROUP BY MONTH(created_at)"
+    result = execute_query(query, params)
 
     # 建立1~12月份的預設結果
     monthly_counts = {m: 0 for m in range(1, 13)}
     for row in result:
         monthly_counts[row["month"]] = row["count"]
 
-    # 轉換成 list 格式
     monthly_counts_list = [{"month": m, "count": monthly_counts[m]} for m in range(1, 13)]
 
     return jsonify({"year": year, "monthly_counts": monthly_counts_list}), 200
@@ -651,6 +666,7 @@ def get_land_section_stats():
     查詢參數:
       - month (必填): 月份 (1 ~ 12)
       - year (可選): 年份，若未提供則預設使用目前台灣時區的年份
+      - office_id (可選): 過濾指定事務所的資料
     回傳格式:
       {
          "year": <year>,
@@ -663,18 +679,25 @@ def get_land_section_stats():
       }
     """
     month = request.args.get("month")
-    year = request.args.get("year") or datetime.now(taiwan_tz).year
-
     if not month:
         return jsonify({"error": "Missing required parameter: month"}), 400
+
+    year = request.args.get("year") or datetime.now(taiwan_tz).year
+    office_id = request.args.get("office_id")
 
     query = """
         SELECT land_section, COUNT(*) AS count
         FROM tasks
         WHERE YEAR(created_at) = %s AND MONTH(created_at) = %s
-        GROUP BY land_section
     """
-    result = execute_query(query, [year, month])
+    params = [year, month]
+
+    if office_id:
+        query += " AND office_id = %s"
+        params.append(office_id)
+
+    query += " GROUP BY land_section"
+    result = execute_query(query, params)
     return jsonify({"year": year, "month": month, "land_section_stats": result}), 200
 
 @app.route("/assign_task", methods=["POST"])
@@ -689,20 +712,32 @@ def assign_task_api():
     result = assign_task(task_id, required_hours)
     return jsonify(result)
 
-# 取得所有請假記錄
 @app.route("/leave_records", methods=["GET"])
 def get_leave_records():
     try:
+        office_id = request.args.get("office_id")
         query = """
-            SELECT leave_id, leave_records.employee_id AS employee_id, start_time AS start, end_time AS end, leave_type, reason, created_at, employees.name AS name
+            SELECT 
+                leave_id, 
+                leave_records.employee_id AS employee_id, 
+                start_time AS start, 
+                end_time AS end, 
+                leave_type, 
+                reason, 
+                created_at, 
+                employees.name AS name
             FROM leave_records
             JOIN employees ON leave_records.employee_id = employees.employee_id
         """
-        records = execute_query(query)
+        params = []
+        if office_id:
+            query += " WHERE employees.office_id = %s"
+            params.append(office_id)
+
+        records = execute_query(query, params)
         return jsonify(records), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 # 新增請假記錄
 @app.route("/leave_records", methods=["POST"])
 def add_leave_record():
@@ -783,22 +818,35 @@ def update_leave_record(leave_id):
 @app.route("/divide_records", methods=["GET"])
 def get_divide_records():
     try:
+        office_id = request.args.get("office_id")
         query = """
-            SELECT divide_id, divide_records.employee_id AS employee_id, start_time AS start, end_time AS end, created_at, employees.name AS name, divide_records.location_num, divide_records.land_num 
+            SELECT 
+                divide_id, 
+                divide_records.employee_id AS employee_id, 
+                start_time AS start, 
+                end_time AS end, 
+                created_at, 
+                employees.name AS name, 
+                divide_records.location_num, 
+                divide_records.land_num 
             FROM divide_records
             JOIN employees ON divide_records.employee_id = employees.employee_id
         """
-        records = execute_query(query)
+        params = []
+        if office_id:
+            query += " WHERE employees.office_id = %s"
+            params.append(office_id)
+
+        records = execute_query(query, params)
         return jsonify(records), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 新增分割記錄
 @app.route("/divide_records", methods=["POST"])
 def add_divide_record():
     data = request.get_json()
     # 必填欄位： employee_id, start_time, end_time, location_num, land_num
-    required_fields = ["employee_id", "start_time", "end_time","location_num", "land_num"]
+    required_fields = ["employee_id", "start_time", "end_time", "location_num", "land_num"]
     if not data or any(field not in data for field in required_fields):
         return jsonify({"error": "Missing required field(s)"}), 400
 
@@ -808,6 +856,7 @@ def add_divide_record():
     location_num = data.get("location_num")
     land_num = data.get("land_num")
 
+    # 新增分割記錄
     query = """
         INSERT INTO divide_records (employee_id, start_time, end_time, location_num, land_num)
         VALUES (%s, %s, %s, %s, %s)
@@ -825,6 +874,28 @@ def add_divide_record():
         cursor.close()
         connection.close()
 
+    # 計算工時差（以小時為單位），假設時間格式為 ISO 格式字串
+    start = datetime.fromisoformat(start_time.rstrip("Z"))
+    end = datetime.fromisoformat(end_time.rstrip("Z"))
+    hours_diff = (end - start).total_seconds() / 3600
+
+    # 更新員工總工時：累加差值
+    update_query = "UPDATE employees SET work_hours = work_hours + %s WHERE employee_id = %s"
+    execute_query(update_query, [hours_diff, employee_id], fetch=False)
+
+    # 更新月工時：根據排班開始時間的年份與月份更新
+    schedule_dt = datetime.fromisoformat(start_time.rstrip("Z"))
+    year = schedule_dt.year
+    month = schedule_dt.month
+    select_query = "SELECT * FROM monthly_work_hours WHERE employee_id = %s AND year = %s AND month = %s"
+    monthly_records = execute_query(select_query, [employee_id, year, month])
+    if monthly_records and len(monthly_records) > 0:
+        update_monthly_query = "UPDATE monthly_work_hours SET work_hours = work_hours + %s WHERE employee_id = %s AND year = %s AND month = %s"
+        execute_query(update_monthly_query, [hours_diff, employee_id, year, month], fetch=False)
+    else:
+        insert_monthly_query = "INSERT INTO monthly_work_hours (employee_id, year, month, work_hours) VALUES (%s, %s, %s, %s)"
+        execute_query(insert_monthly_query, [employee_id, year, month, hours_diff], fetch=False)
+
     new_record = {
         "divide_id": divide_id,
         "employee_id": employee_id,
@@ -836,15 +907,49 @@ def add_divide_record():
     }
     return jsonify(new_record), 201
 
-# 刪除分割記錄（依 divide_id 刪除）
 @app.route("/divide_records/<int:divide_id>", methods=["DELETE"])
 def delete_divide_record(divide_id):
-    query = "DELETE FROM divide_records WHERE divide_id = %s"
+    # 先查詢要刪除的分割記錄資訊
+    select_query = "SELECT employee_id, start_time, end_time FROM divide_records WHERE divide_id = %s"
+    record = execute_query(select_query, (divide_id,))
+    if not record or len(record) == 0:
+        return jsonify({"error": "Divide record not found"}), 404
+
+    record = record[0]
+    employee_id = record["employee_id"]
+    start_time = record["start_time"]
+    end_time = record["end_time"]
+
+    # 刪除分割記錄
+    delete_query = "DELETE FROM divide_records WHERE divide_id = %s"
     try:
-        execute_query(query, (divide_id,), fetch=False)
-        return jsonify({"message": "Divide record deleted successfully"}), 200
+        execute_query(delete_query, (divide_id,), fetch=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+    # 計算工時差
+    start = datetime.fromisoformat(start_time.rstrip("Z"))
+    end = datetime.fromisoformat(end_time.rstrip("Z"))
+    hours_diff = (end - start).total_seconds() / 3600.0
+    print("Hours difference:", hours_diff)
+
+    # 更新員工總工時：扣除該時段工時，並確保不小於 0
+    update_emp_query = "UPDATE employees SET work_hours = GREATEST(work_hours - %s, 0) WHERE employee_id = %s"
+    execute_query(update_emp_query, [hours_diff, employee_id], fetch=False)
+
+    # 更新月工時：以該分割記錄的開始時間所屬的年份與月份扣除該工時差
+    schedule_dt = datetime.fromisoformat(start_time.rstrip("Z"))
+    year = schedule_dt.year
+    month = schedule_dt.month
+    update_monthly_query = """
+        UPDATE monthly_work_hours 
+        SET work_hours = GREATEST(work_hours - %s, 0)
+        WHERE employee_id = %s AND year = %s AND month = %s
+    """
+    execute_query(update_monthly_query, [hours_diff, employee_id, year, month], fetch=False)
+
+    return jsonify({"message": "Divide record deleted successfully"}), 200
+
 
 # 更新請假記錄（依 divide_id 更新）
 @app.route("/divide_records/<int:divide_id>", methods=["PUT"])
@@ -893,10 +998,16 @@ def update_divide_record(divide_id):
 @app.route("/employees", methods=["GET"])
 def get_employees():
     """
-    取得所有員工資料，回傳 employee_id, name, work_hours, work
+    取得所有員工資料，回傳 employee_id, name, work_hours, work, office_id
+    若傳入 office_id，則僅回傳該事務所的員工資料
     """
     try:
-        employees = get_employees_from_db()
+        office_id = request.args.get("office_id")
+        if office_id:
+            query = "SELECT employee_id, name, work_hours, work, office_id FROM employees WHERE office_id = %s"
+            employees = execute_query(query, (office_id,))
+        else:
+            employees = get_employees_from_db()
         return jsonify(employees), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -907,20 +1018,22 @@ def add_employee():
     if not data or "name" not in data:
         return jsonify({"error": "Missing required field: name"}), 400
 
-    # 讀取前端傳入的資料，若未提供 work 或 work_hours 則預設為 0
+    # 讀取前端傳入的資料，若未提供 work 或 work_hours 則預設為 1 與 0
     name = data.get("name")
     work = data.get("work", 1)
     work_hours = data.get("work_hours", 0)
+    office_id = data.get("office_id")
+    if office_id is None:
+        return jsonify({"error": "Missing required field: office_id"}), 400
 
-    # 建立 INSERT 語句
-    query = "INSERT INTO employees (name, work, work_hours) VALUES (%s, %s, %s)"
-    # 取得資料庫連線並執行
+    # 建立 INSERT 語句，增加 office_id 欄位
+    query = "INSERT INTO employees (name, work, work_hours, office_id) VALUES (%s, %s, %s, %s)"
+    
     connection = mysql.connector.connect(**db_config)
     cursor = connection.cursor()
     try:
-        cursor.execute(query, (name, work, work_hours))
+        cursor.execute(query, (name, work, work_hours, office_id))
         connection.commit()
-        # 取得自動生成的 employee_id
         employee_id = cursor.lastrowid
     except mysql.connector.Error as e:
         connection.rollback()
@@ -929,12 +1042,12 @@ def add_employee():
         cursor.close()
         connection.close()
     
-    # 回傳新增的員工資料
     new_employee = {
         "employee_id": employee_id,
         "name": name,
         "work": work,
-        "work_hours": work_hours
+        "work_hours": work_hours,
+        "office_id": office_id
     }
     return jsonify(new_employee), 201
 
