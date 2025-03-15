@@ -123,8 +123,10 @@ def assign_task(task_id, required_hours):
         SELECT start_time, end_time FROM schedule WHERE employee_id = %s
         UNION ALL
         SELECT start_time, end_time FROM leave_records WHERE employee_id = %s
+        UNION ALL
+        SELECT start_time, end_time FROM divide_records WHERE employee_id = %s
         """        
-        return execute_query(query, (employee_id,employee_id))
+        return execute_query(query, (employee_id,employee_id,employee_id))
 
     def is_time_slot_available(employee_id, time_slot):
         """
