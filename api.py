@@ -108,12 +108,13 @@ def next_time_slot(current_time_slot):
         next_date = next_workday(next_date)  # 跳過週末
         return f"{next_date.strftime('%Y-%m-%d')} {time_slots[0]}"
 
-def assign_task(task_id, required_hours):
+def assign_task(task_id, office_id, required_hours):
     current_time_slot = get_current_taiwan_time()  # 獲取當前時間的台灣時區格式
     required_shifts = required_hours // HOURS_PER_SHIFT
 
     # 從資料庫獲取員工列表
-    employees = get_employees_from_db()
+    query = "SELECT employee_id, name, work_hours, work, office_id FROM employees WHERE office_id = %s"
+    employees = execute_query(query, (office_id,))
 
     def get_schedule_for_employee(employee_id):
         """
@@ -707,11 +708,12 @@ def assign_task_api():
     data = request.json
     task_id = data.get("task_id")
     required_hours = data.get("required_hours")
+    office_id = data.get("office_id")
 
     if not task_id :
         return jsonify({"error": "Missing required fields"}), 400
 
-    result = assign_task(task_id, required_hours)
+    result = assign_task(task_id, office_id, required_hours)
     return jsonify(result)
 
 @app.route("/leave_records", methods=["GET"])
