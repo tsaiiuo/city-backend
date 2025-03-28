@@ -462,7 +462,7 @@ def add_schedule():
         return jsonify({"error": "Missing required fields"}), 400
 
     if not employee_id and name:
-        query = "SELECT employee_id FROM employees WHERE name = %s"
+        query = "SELECT employee_id FROM employees WHERE name = %s "
         result = execute_query(query, [name])
         if not result:
             return jsonify({"error": "Employee not found"}), 404
