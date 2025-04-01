@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import mysql.connector
+import mysql.coginnector
 from flask_cors import CORS
 from datetime import datetime
 from datetime import datetime, timedelta
