@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import mysql.coginnector
+import mysql.connector
 from flask_cors import CORS
 from datetime import datetime
 from datetime import datetime, timedelta
@@ -21,7 +21,7 @@ load_dotenv()
 db_config = {
     "host": os.getenv("MYSQL_HOST", "localhost"),
     "user": os.getenv("MYSQL_USER", "root"),
-    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "password": os.getenv("MYSQL_PASSWORD", "gotobed!"),
     "database": os.getenv("MYSQL_DATABASE", "cityproject")
 }
 print(os.getenv("MYSQL_HOST"))
@@ -1119,26 +1119,72 @@ offices = {
 csv_path = './109年度臺南市宗地地號屬性資料_合併.csv'
 df = pd.read_csv(csv_path)
 
-def get_lat_lng(adm_num,land_num): #adm_num , land_num皆為str
-  find = df[(df["地段碼"].astype(str) == str(adm_num)) & (df["地號"] == str(land_num))]
+# def get_lat_lng(adm_num,land_num): #adm_num , land_num皆為str
+#   find = df[(df["地段碼"].astype(str) == str(adm_num)) & (df["地號"] == str(land_num))]
 
-  if not find.empty:
-    lat = find["Latitude"].values[0]
-    lng = find["Longitude"].values[0]
-    return lat,lng
-  else:
+#   if not find.empty:
+#     lat = find["Latitude"].values[0]
+#     lng = find["Longitude"].values[0]
+#     return lat,lng
+#   else:
+#     try:
+#       find = df[(df["地段碼"].astype(str) == str(adm_num)) & (df["地號"] == str(land_num).split('-')[0])]
+#       print("aa",str(land_num).split('-')[0])
+#       lat = find["Latitude"].values[0]
+#       lng = find["Longitude"].values[0]
+#     except Exception as error:
+#       print('Caught this error: ' + repr(error))
+#       return None,None
+#     return lat,lng
+
+
+
+def get_lat_lng(adm_num, land_num, connection):
+    cursor = connection.cursor(dictionary=True)
+    
     try:
-      find = df[(df["地段碼"].astype(str) == str(adm_num)) & (df["地號"] == str(land_num).split('-')[0])]
-      print("aa",str(land_num).split('-')[0])
-      lat = find["Latitude"].values[0]
-      lng = find["Longitude"].values[0]
-    except Exception as error:
-      print('Caught this error: ' + repr(error))
-      return None,None
-    return lat,lng
+        # 先找到對應的 land_sections.id（= section_id）
+        query_section = """
+            SELECT id FROM land_sections
+            WHERE number = %s
+        """
+        cursor.execute(query_section, (adm_num,))
+        section = cursor.fetchone()
+        
+        if not section:
+            print(f"找不到地段碼為 {adm_num} 的 land_section")
+            return None, None
+        
+        section_id = section["id"]
 
-print(get_lat_lng('5311','466-4'))
-print(get_lat_lng('8019','4-10'))
+        # 查詢 stake_points 資料
+        query_stake = """
+            SELECT latitude, longitude FROM stake_points
+            WHERE section_id = %s AND stake_point = %s
+        """
+        cursor.execute(query_stake, (section_id, land_num))
+        point = cursor.fetchone()
+        
+        if point:
+            return point["latitude"], point["longitude"]
+        else:
+            # 嘗試地號有 '-' 情況（如 12-1 → 12）
+            base_land_num = land_num.split('-')[0]
+            cursor.execute(query_stake, (section_id, base_land_num))
+            point = cursor.fetchone()
+            if point:
+                return point["latitude"], point["longitude"]
+            else:
+                return None, None
+
+    except mysql.connector.Error as err:
+        print(f"MySQL Error: {err}")
+        return None, None
+    finally:
+        cursor.close()
+
+# print(get_lat_lng('2039','505'))
+# print(get_lat_lng('8019','4-10'))
 
 #計算距離
 #OpenRouteService API
@@ -1217,9 +1263,13 @@ def time_predict():
     time = time+5
 
   cor_off = [offices[office]["lon"], offices[office]["lat"]]
-  lat , lng = get_lat_lng(adm_num,land_num)
-  cor_des = [lng,lat]
-  if lat is None: return '0'
+  connection = mysql.connector.connect(**db_config)
+  lat , lng = get_lat_lng(adm_num,land_num,connection)
+  if lat is None or lng is None:
+    return '0'
+  cor_des = [float(lng), float(lat)] 
+#   cor_des = [lng,lat]
+#   if lat is None: return '0'
   distance = calculate_distance_ors(api_key,[cor_off,cor_des])
   time = time+int(distance)*0.002
 
@@ -1239,5 +1289,35 @@ def checkpoint():
         'message': 'Checkpoint reached successfully!',
         'timestamp': current_time
     })
+
+#取得地段名跟地段號
+@app.route("/land_sections", methods=["GET"])
+def get_land_sections():
+    """
+    取得所有的地段名 (name) 和地段號 (number)。
+    可選查詢參數:
+      - office_id (可選): 過濾指定事務所的地段
+    回傳格式:
+      {
+        "land_sections": [
+            {"name": "地段A", "number": "001"},
+            {"name": "地段B", "number": "002"}
+        ]
+      }
+    """
+    office_id = request.args.get("office_id")
+
+    query = "SELECT name, number FROM land_sections"
+    params = []
+
+    if office_id:
+        query += " WHERE office_id = %s"
+        params.append(office_id)
+
+    result = execute_query(query, params)
+    return jsonify({"land_sections": result}), 200
+
+
+
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8080)
