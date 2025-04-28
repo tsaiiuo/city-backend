@@ -7,7 +7,6 @@ import pytz
 from collections import defaultdict
 from dotenv import load_dotenv
 #---------------------------------
-import pandas as pd
 import os
 import numpy as np
 import requests
@@ -928,27 +927,6 @@ def update_divide_record(divide_id):
         return jsonify({"error": str(e)}), 500
 #分割
 
-# # Load the CSV files
-# FilePath = '/Users/huannn/Desktop/cityproject/flask/data'
-# allFileList = os.listdir(FilePath)
-# data = pd.DataFrame()
-
-# for file in allFileList:
-#     file_path = os.path.join(FilePath,file)
-#     if os.path.isfile(file_path):
-#         temp = pd.read_csv(file_path, encoding='utf-8')
-#         data = pd.concat([data, temp],ignore_index=True)
-#     else:
-#         print('not a file')
-
-#   ##把年月分開
-# data['年月'] = data['年月'].apply(lambda x: f'{x:.2f}')
-# temp = pd.DataFrame(data['年月'].str.split(".").tolist(),columns = ['年','月'])
-# temp = temp.astype(int)
-# data = pd.concat([temp, data],axis=1).drop('年月', axis=1)
-
-# data['行政區'] = data['行政區'].str.replace(' ','')
-# data.fillna(0, inplace=True)
 @app.route("/employees", methods=["GET"])
 def get_employees():
     """
@@ -1065,10 +1043,6 @@ offices = {
 #------------------------------------------------------------------#
 
 #政府公開資料查詢經緯度
-
-csv_path = './109年度臺南市宗地地號屬性資料_合併.csv'
-df = pd.read_csv(csv_path)
-
 # def get_lat_lng(adm_num,land_num): #adm_num , land_num皆為str
 #   find = df[(df["地段碼"].astype(str) == str(adm_num)) & (df["地號"] == str(land_num))]
 
