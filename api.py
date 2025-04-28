@@ -62,193 +62,143 @@ def get_current_taiwan_time():
     # 格式化時間
     return taiwan_now.replace(hour=hour, minute=minute, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
 print(get_current_taiwan_time())
-# 判斷是否為假日（週六或週日）
-def is_weekend(date):
-    weekday = date.weekday()  # 0 是星期一，6 是星期日
-    return weekday in (5, 6)  # 5 是星期六，6 是星期日
+def next_workday(d: datetime) -> datetime:
+    """跳過週六(5)和週日(6)，回到下個工作日。"""
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d
 
-# 跳到下一個工作日（星期一）
-def next_workday(date):
-    while is_weekend(date):  # 只要是週末就繼續加一天
-        date += timedelta(days=1)
-    return date
+def next_time_slot(current_time_slot: str) -> str:
+    """
+    輸入 "YYYY-MM-DD HH:MM"，
+    回傳同一天的下一時段，或下一工作日的第一個時段。
+    """
+    date_str, slot = current_time_slot.split(' ', 1)
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    # 最先跳過初始的週末
+    d = next_workday(d)
 
-# MySQL 查詢執行器
-def execute_query(query, params=None, fetch=True):
-    connection = mysql.connector.connect(**db_config)
-    cursor = connection.cursor(dictionary=True)
-    cursor.execute(query, params or ())
-    if fetch:
-        results = cursor.fetchall()
-    else:
-        results = None
-    connection.commit()
-    cursor.close()
-    connection.close()
-    return results
-# 從資料庫中獲取員工數據
-def get_employees_from_db():
-    query = "SELECT employee_id, name, work_hours, work FROM employees"
-    return execute_query(query)
-# 移動到下一個時間段
-def next_time_slot(current_time_slot):
-    date, time_slot = current_time_slot.split()
+    # 嘗試在本日取下一個 slot
     try:
-        next_slot_index = time_slots.index(time_slot) + 1
-        if next_slot_index < len(time_slots):
-            return f"{date} {time_slots[next_slot_index]}"
-        else:
-            # 當前時間段已到一天的結尾，移動到下一天
-            next_date = datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
-            next_date = next_workday(next_date)  # 跳過週末
-            return f"{next_date.strftime('%Y-%m-%d')} {time_slots[0]}"
+        idx = time_slots.index(slot) + 1
     except ValueError:
-        # 如果 time_slot 不在 time_slots 中，直接跳到隔天的起點，並跳過週末
-        next_date = datetime.strptime(date, "%Y-%m-%d") + timedelta(days=1)
-        next_date = next_workday(next_date)  # 跳過週末
-        return f"{next_date.strftime('%Y-%m-%d')} {time_slots[0]}"
+        idx = 0
+    if idx < len(time_slots):
+        return f"{d.strftime('%Y-%m-%d')} {time_slots[idx]}"
+
+    # 如果已是最後一個 slot，就移到下一個工作日的第一個 slot
+    next_day = next_workday(d + timedelta(days=1))
+    return f"{next_day.strftime('%Y-%m-%d')} {time_slots[0]}"
+
+def execute_query(query: str, params=None, fetch=True):
+    conn = mysql.connector.connect(**db_config)
+    cur = conn.cursor(dictionary=True)
+    cur.execute(query, params or ())
+    results = cur.fetchall() if fetch else None
+    conn.commit()
+    cur.close()
+    conn.close()
+    return results
 
 def assign_task(task_id, office_id, required_hours):
-    current_time_slot = get_current_taiwan_time()  # 獲取當前時間的台灣時區格式
+    # 假設 get_current_taiwan_time() 回傳 "YYYY-MM-DD HH:MM"
+    current_time_slot = get_current_taiwan_time()
     required_shifts = required_hours // HOURS_PER_SHIFT
 
-    # 從資料庫獲取員工列表
-    query = "SELECT employee_id, name, work_hours, work, office_id FROM employees WHERE office_id = %s"
-    employees = execute_query(query, (office_id,))
+    # 取得同辦公室的所有員工
+    employees = execute_query(
+        "SELECT employee_id, name, work_hours, work FROM employees WHERE office_id=%s",
+        (office_id,)
+    )
 
-    def get_schedule_for_employee(employee_id):
-        """
-        根據 employee_id 從 schedule 表中獲取員工的所有排班時間段
-        """
-        query = """
-        SELECT start_time, end_time FROM schedule WHERE employee_id = %s
+    def get_schedule_for_employee(emp_id):
+        sql = """
+        SELECT start_time, end_time FROM schedule WHERE employee_id=%s
         UNION ALL
-        SELECT start_time, end_time FROM leave_records WHERE employee_id = %s
+        SELECT start_time, end_time FROM leave_records WHERE employee_id=%s
         UNION ALL
-        SELECT start_time, end_time FROM divide_records WHERE employee_id = %s
-        """        
-        return execute_query(query, (employee_id,employee_id,employee_id))
-
-    def is_time_slot_available(employee_id, time_slot):
+        SELECT start_time, end_time FROM divide_records WHERE employee_id=%s
         """
-        檢查指定的員工在某個時間段是否可用
-        """
-        schedules = get_schedule_for_employee(employee_id)
-        for schedule in schedules:
+        return execute_query(sql, (emp_id, emp_id, emp_id))
 
-            start_time = datetime.strptime(schedule["start_time"].rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f")
-            start_time=start_time.replace(tzinfo=pytz.utc)
-            start_time=start_time.astimezone(taiwan_tz)
-            end_time = datetime.strptime(schedule["end_time"].rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f")
-            end_time=end_time.replace(tzinfo=pytz.utc)
-            end_time=end_time.astimezone(taiwan_tz)
-            current_time = datetime.strptime(time_slot, "%Y-%m-%d %H:%M")
-            current_time = taiwan_tz.localize(current_time)
+    def is_time_slot_available(emp_id, slot_str):
+        # 只取 "YYYY-MM-DD HH:MM"
+        date_part, rest = slot_str.strip().split(' ', 1)
+        hhmm = rest.split()[0]
+        try:
+            dt = datetime.strptime(f"{date_part} {hhmm}", "%Y-%m-%d %H:%M")
+        except ValueError:
+            return False
+        now = taiwan_tz.localize(dt)
 
-           
-            # print(start_time <= current_time <= end_time)
-            if start_time <= current_time < end_time:
+        for rec in get_schedule_for_employee(emp_id):
+            st = datetime.strptime(rec["start_time"].rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f")
+            st = st.replace(tzinfo=pytz.utc).astimezone(taiwan_tz)
+            en = datetime.strptime(rec["end_time"].rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f")
+            en = en.replace(tzinfo=pytz.utc).astimezone(taiwan_tz)
+            if st <= now < en:
                 return False
         return True
 
-    def generate_slots(employee_id, start_time_slot, required_shifts):
-        """
-        根據員工 ID 和開始時間段生成排班時間段，跳過有衝突的時間
-        """
+    def generate_slots(emp_id, start_slot, shifts_needed):
         slots = []
-        temp_time_slot = start_time_slot
-        date, time_slot = temp_time_slot.split()
+        temp = start_slot.strip()
 
-        if time_slot not in time_slots:
+        # 如果一開始在週末，先跳到下個工作日的第一個 slot
+        d_str, t_str = temp.split(' ', 1)
+        d0 = datetime.strptime(d_str, "%Y-%m-%d")
+        if d0.weekday() >= 5:
+            d0 = next_workday(d0)
+            temp = f"{d0.strftime('%Y-%m-%d')} {time_slots[0]}"
+        elif t_str not in time_slots:
+            temp = next_time_slot(temp)
 
-            temp_time_slot = next_time_slot(temp_time_slot)
-        while len(slots) < required_shifts:
-            if is_time_slot_available(employee_id, temp_time_slot):
-                slots.append(temp_time_slot)
-            temp_time_slot = next_time_slot(temp_time_slot)
+        while len(slots) < shifts_needed:
+            d_str, _ = temp.split(' ', 1)
+            d_curr = datetime.strptime(d_str, "%Y-%m-%d")
+            # 只加工作日且無衝突
+            if d_curr.weekday() < 5 and is_time_slot_available(emp_id, temp):
+                slots.append(temp)
+            temp = next_time_slot(temp)
         return slots
 
-    # 選擇可用員工，排除在當前時間段有衝突的員工
-    available_employees = sorted(
-        [
-            emp for emp in employees
-            if emp["work"] == 1 
-        ],
-        key=lambda emp: emp["work_hours"]
+    # 篩出目前可用員工，按工時排序
+    available = sorted(
+        [e for e in employees if e["work"] == 1],
+        key=lambda e: e["work_hours"]
     )
-    if required_hours == 0 :
+
+    if required_hours == 0 or not available:
         return {
             "task_id": task_id,
             "best_assignment": {
-                "assigned_employee": "無法判別地號請自行選擇員工",
-                "assigned_slots": "",
+                "assigned_employee": "無法排班",
+                "assigned_slots": [],
                 "start_time": "",
                 "end_time": "",
-                "required_hours": "無法判別地號"
-            }}
-    if len(available_employees) >= 2:  # 確保有足夠的員工可選
-        best_employee = available_employees[0]
-        second_best_employee = available_employees[1]
-
-        # 為最佳員工生成排班
-        best_assigned_slots = generate_slots(best_employee["employee_id"], current_time_slot, required_shifts)
-        best_start_time = best_assigned_slots[0]
-        best_end_time = best_assigned_slots[-1]
-
-        # 為次佳員工生成排班
-        second_assigned_slots = generate_slots(second_best_employee["employee_id"], current_time_slot, required_shifts)
-        second_start_time = second_assigned_slots[0]
-        second_end_time = second_assigned_slots[-1]
-        print(best_employee["name"])
-        return {
-            "task_id": task_id,
-            "best_assignment": {
-                "assigned_employee": best_employee["name"],
-                "assigned_slots": best_assigned_slots,
-                "start_time": best_start_time,
-                "end_time": best_end_time,
-                "required_hours": required_hours
-            },
-            "second_best_assignment": {
-                "assigned_employee": second_best_employee["name"],
-                "assigned_slots": second_assigned_slots,
-                "start_time": second_start_time,
-                "end_time": second_end_time,
                 "required_hours": required_hours
             }
         }
-    elif len(available_employees) == 1:  # 僅有一名可用員工
-        best_employee = available_employees[0]
 
-        # 為最佳員工生成排班
-        best_assigned_slots = generate_slots(best_employee["employee_id"], current_time_slot, required_shifts)
-        best_start_time = best_assigned_slots[0]
-        best_end_time = best_assigned_slots[-1]
-        print(best_employee["name"])
+    # 為前兩名員工分別生成排班
+    def make_assignment(emp):
+        slots = generate_slots(emp["employee_id"], current_time_slot, required_shifts)
         return {
-            "task_id": task_id,
-            "best_assignment": {
-                "assigned_employee": best_employee["name"],
-                "assigned_slots": best_assigned_slots,
-                "start_time": best_start_time,
-                "end_time": best_end_time,
-                "required_hours": required_hours
-            },
-            "second_best_assignment": None  # 無次佳分配
+            "assigned_employee": emp["name"],
+            "assigned_slots": slots,
+            "start_time": slots[0],
+            "end_time": slots[-1],
+            "required_hours": required_hours
         }
-    else:
-        print(123)
-        return {
-            "task_id": task_id,
-            "best_assignment": {
-                "assigned_employee": "無法判別地號請自行選擇員工",
-                "assigned_slots": "",
-                "start_time": "",
-                "end_time": "",
-                "required_hours": "無員工可排班"
-            }}
 
+    best = make_assignment(available[0])
+    second = make_assignment(available[1]) if len(available) > 1 else None
 
+    return {
+        "task_id": task_id,
+        "best_assignment": best,
+        "second_best_assignment": second
+    }
 
 
 
@@ -1268,9 +1218,12 @@ def time_predict():
   if lat is None or lng is None:
     return '0'
   cor_des = [float(lng), float(lat)] 
+  print(cor_des)
+  print(cor_off)
 #   cor_des = [lng,lat]
 #   if lat is None: return '0'
   distance = calculate_distance_ors(api_key,[cor_off,cor_des])
+  print(distance)
   time = time+int(distance)*0.002
 
   if time<120:
